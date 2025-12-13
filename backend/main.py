@@ -60,9 +60,22 @@ app.add_middleware(
 )
 
 # Serves Static Files (SPA Support)
+# Serves Static Files (SPA Support)
+# Serves Static Files (SPA Support)
+import mimetypes
+mimetypes.init()
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+
 static_dir = "static"
+# DEBUG: Unconditional print
+print(f"DEBUG: CWD is {os.getcwd()}")
+print(f"DEBUG: Directory contents: {os.listdir('.')}")
 if os.path.exists(static_dir):
+    print(f"DEBUG: Mounting {static_dir} at /assets")
     app.mount("/assets", StaticFiles(directory=f"{static_dir}/assets"), name="assets")
+else:
+    print(f"DEBUG: static_dir '{static_dir}' DOES NOT EXIST!")
 
 # Schemas
 class ProjectCreate(BaseModel):
