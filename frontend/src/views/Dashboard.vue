@@ -40,7 +40,7 @@ const searchText = ref('')
 const dateRange = ref(null) // [start, end]
 const loadLimit = ref(500)
 
-const API_BASE = 'http://localhost:8000/api'
+const API_BASE = '/api'
 
 // Fetchers
 const fetchWithAuth = async (url, options = {}) => {

@@ -17,6 +17,8 @@
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -37,6 +39,30 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
+
+# Lifecycle
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Establish DB connection and create tables
+    async with engine.begin() as conn:
+        await conn.run_sync(models.Base.metadata.create_all)
+    yield
+
+app = FastAPI(title="Notify Hub API", lifespan=lifespan)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serves Static Files (SPA Support)
+static_dir = "static"
+if os.path.exists(static_dir):
+    app.mount("/assets", StaticFiles(directory=f"{static_dir}/assets"), name="assets")
 
 # Schemas
 class ProjectCreate(BaseModel):
@@ -273,9 +299,17 @@ async def purge_deleted_messages(current_user: str = Depends(get_current_user), 
     await db.commit()
     return {"status": "success", "deleted_count": result.rowcount}
 
-@app.get("/")
-async def root():
-    return {"message": "Notify Hub API is running"}
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    # If static file exists (e.g. assets/...) it is handled by specific mount if matched.
+    # But if verify match failed or it is a frontend route like /dashboard, return index.html
+    
+    # Check if we have index.html (Production)
+    index_path = f"{static_dir}/index.html"
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    
+    return {"message": "Notify Hub API is running. (Frontend not built/found in static/)"}
 
 if __name__ == "__main__":
     import uvicorn
