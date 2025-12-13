@@ -8,7 +8,8 @@ def test_push_only():
     print(f"Testing Push API against {BASE_URL}...")
     
     headers = {
-        "X-Project-Key": API_KEY
+        "X-Project-Key": API_KEY,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
     # Payload with project_name (Auto-create/Find logic)
