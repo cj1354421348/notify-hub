@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:18-alpine as frontend-builder
+FROM node:22-slim as frontend-builder
 WORKDIR /app/frontend
 
 # Install dependencies (cache optimized)
