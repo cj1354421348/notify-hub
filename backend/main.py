@@ -314,6 +314,9 @@ async def purge_deleted_messages(current_user: str = Depends(get_current_user), 
 
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):
+    # DEBUG: Check what routes are falling through
+    print(f"DEBUG: Catch-all hit: {full_path}")
+    
     # If static file exists (e.g. assets/...) it is handled by specific mount if matched.
     # But if verify match failed or it is a frontend route like /dashboard, return index.html
     
