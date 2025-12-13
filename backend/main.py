@@ -17,8 +17,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Header, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -60,22 +59,12 @@ app.add_middleware(
 )
 
 # Serves Static Files (SPA Support)
-# Serves Static Files (SPA Support)
-# Serves Static Files (SPA Support)
 import mimetypes
 mimetypes.init()
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 
 static_dir = "static"
-# DEBUG: Unconditional print
-print(f"DEBUG: CWD is {os.getcwd()}")
-print(f"DEBUG: Directory contents: {os.listdir('.')}")
-if os.path.exists(static_dir):
-    print(f"DEBUG: Mounting {static_dir} at /assets")
-    app.mount("/assets", StaticFiles(directory=f"{static_dir}/assets"), name="assets")
-else:
-    print(f"DEBUG: static_dir '{static_dir}' DOES NOT EXIST!")
 
 # Schemas
 class ProjectCreate(BaseModel):
@@ -314,13 +303,22 @@ async def purge_deleted_messages(current_user: str = Depends(get_current_user), 
 
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):
-    # DEBUG: Check what routes are falling through
-    print(f"DEBUG: Catch-all hit: {full_path}")
-    
-    # If static file exists (e.g. assets/...) it is handled by specific mount if matched.
-    # But if verify match failed or it is a frontend route like /dashboard, return index.html
-    
-    # Check if we have index.html (Production)
+    # 1. SPECIAL HANDLING FOR ASSETS
+    # Manually serve static assets to ensure correct routing and MIME types
+    if full_path.startswith("assets/") or full_path == "vite.svg":
+        file_disk_path = os.path.join(static_dir, full_path) if full_path != "vite.svg" else os.path.join(static_dir, "vite.svg")
+        
+        if os.path.exists(file_disk_path) and os.path.isfile(file_disk_path):
+             mime_type, _ = mimetypes.guess_type(file_disk_path)
+             if full_path.endswith(".js"): 
+                 mime_type = "application/javascript"
+             elif full_path.endswith(".css"):
+                 mime_type = "text/css"
+             return FileResponse(file_disk_path, media_type=mime_type)
+        else:
+             return Response(status_code=404)
+
+    # 2. SPA Fallback (Return index.html)
     index_path = f"{static_dir}/index.html"
     if os.path.exists(index_path):
         return FileResponse(index_path)
