@@ -1,5 +1,5 @@
 # Stage 1: Build Frontend
-FROM node:22-slim as frontend-builder
+FROM node:22 as frontend-builder
 WORKDIR /app/frontend
 
 # Install dependencies (cache optimized)
@@ -12,7 +12,7 @@ RUN npm run build
 # Output is in /app/frontend/dist
 
 # Stage 2: Build Backend & Final Image
-FROM python:3.9-slim
+FROM python:3.9
 WORKDIR /app
 
 # Install Backend Dependencies
