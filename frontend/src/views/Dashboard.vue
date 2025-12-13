@@ -17,6 +17,8 @@
 -->
 <script setup>
 import { useRouter } from 'vue-router'
+// Manual imports required for h() render functions (AutoImport doesn't catch these)
+import { NTag, NButton, NPopconfirm } from 'naive-ui'
 
 const router = useRouter()
 const message = useMessage()
