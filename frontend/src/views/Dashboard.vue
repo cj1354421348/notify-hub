@@ -16,13 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 <script setup>
-import { ref, onMounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { 
-  NLayout, NLayoutSider, NLayoutHeader, NLayoutContent, NMenu, 
-  NButton, NTag, NDataTable, NStatistic, NCard,
-  useMessage, NBreadcrumb, NBreadcrumbItem, NInput, NSelect, NPopconfirm, NSpace, NDatePicker
-} from 'naive-ui'
 
 const router = useRouter()
 const message = useMessage()

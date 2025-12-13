@@ -16,7 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 <script setup>
-import { NConfigProvider, NMessageProvider, NGlobalStyle, zhCN, dateZhCN } from 'naive-ui'
+import { zhCN, dateZhCN } from 'naive-ui'
 
 // Custom Theme Variables for "Tech Blue"
 const themeOverrides = {

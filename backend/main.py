@@ -14,9 +14,10 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from fastapi import FastAPI, Depends, HTTPException, Header, status
+from fastapi import FastAPI, Depends, HTTPException, Header, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Notify Hub API", lifespan=lifespan)
 
-# CORS
+# CORS & Gzip
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -57,6 +58,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Serves Static Files (SPA Support)
 import mimetypes
@@ -302,12 +304,28 @@ async def purge_deleted_messages(current_user: str = Depends(get_current_user), 
     return {"status": "success", "deleted_count": result.rowcount}
 
 @app.get("/{full_path:path}")
-async def catch_all(full_path: str):
+async def catch_all(full_path: str, request: Request = None): # Add request parameter
     # 1. SPECIAL HANDLING FOR ASSETS
-    # Manually serve static assets to ensure correct routing and MIME types
     if full_path.startswith("assets/") or full_path == "vite.svg":
         file_disk_path = os.path.join(static_dir, full_path) if full_path != "vite.svg" else os.path.join(static_dir, "vite.svg")
         
+        # Check for pre-compressed file (.br) - Prioritize Brotli
+        br_path = file_disk_path + ".br"
+        gzip_path = file_disk_path + ".gz"
+        accept_encoding = request.headers.get("accept-encoding", "") if request else ""
+        
+        if "br" in accept_encoding and os.path.exists(br_path) and os.path.isfile(br_path):
+             mime_type, _ = mimetypes.guess_type(file_disk_path) 
+             if full_path.endswith(".js"): mime_type = "application/javascript"
+             elif full_path.endswith(".css"): mime_type = "text/css"
+             return FileResponse(br_path, media_type=mime_type, headers={"Content-Encoding": "br"})
+
+        if "gzip" in accept_encoding and os.path.exists(gzip_path) and os.path.isfile(gzip_path):
+             mime_type, _ = mimetypes.guess_type(file_disk_path)
+             if full_path.endswith(".js"): mime_type = "application/javascript"
+             elif full_path.endswith(".css"): mime_type = "text/css"
+             return FileResponse(gzip_path, media_type=mime_type, headers={"Content-Encoding": "gzip"})
+
         if os.path.exists(file_disk_path) and os.path.isfile(file_disk_path):
              mime_type, _ = mimetypes.guess_type(file_disk_path)
              if full_path.endswith(".js"): 

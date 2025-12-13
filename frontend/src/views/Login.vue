@@ -16,11 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 -->
 <script setup>
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { 
-  NCard, NInput, NButton, NForm, NFormItem, useMessage 
-} from 'naive-ui'
 
 const router = useRouter()
 const message = useMessage()
