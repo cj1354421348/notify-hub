@@ -117,6 +117,14 @@ const handlePurge = async () => {
     } catch (e) {}
 }
 
+const handleToday = () => {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+    dateRange.value = [start.getTime(), end.getTime()]
+    loadData(true)
+}
+
 const handleDeleteProject = async (id, event) => {
     try {
         const res = await fetchWithAuth(`/projects/${id}`, { method: 'DELETE' })
@@ -321,6 +329,11 @@ const handleLogout = () => {
                         {label: '近5000条', value: 5000}
                     ]" size="medium" @update:value="() => loadData(true)" />
                 </div>
+
+                <!-- 3.5. Shortcut: Today -->
+                 <n-button strong secondary type="info" size="medium" @click="handleToday">
+                    今日
+                 </n-button>
 
                 <!-- 4. Client-Side Filter: Search -->
                 <div class="filter-item w-search">

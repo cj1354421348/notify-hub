@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - TZ=Asia/Shanghai
     env_file:
       - ./backend/.env
 
@@ -16,6 +17,8 @@ services:
     build:
       context: ./frontend
     restart: always
+    environment:
+      - TZ=Asia/Shanghai
     ports:
       - "80:80"
     depends_on:
