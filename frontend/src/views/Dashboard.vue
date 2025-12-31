@@ -17,24 +17,58 @@
 -->
 <script setup>
 import { useRouter } from 'vue-router'
-// Manual imports required for h() render functions (AutoImport doesn't catch these)
-import { NTag, NButton, NPopconfirm } from 'naive-ui'
+import { NTag, NButton, NPopconfirm, NIcon, NDropdown } from 'naive-ui'
+import {
+  HomeOutline,
+  FolderOutline,
+  NotificationsOutline,
+  AlertCircleOutline,
+  EllipsisVertical,
+  TrashOutline,
+  RefreshOutline,
+  CopyOutline,
+  FilterOutline,
+  MenuOutline
+} from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
 
 // State
 const projects = ref([])
-const messages = ref([]) // Stores the RAW full dataset
+const messages = ref([])
 const loading = ref(true)
-const selectedProjectKey = ref('all') // 'all' or project_id
-const collapsed = ref(false)
+const selectedProjectKey = ref('all')
+const checkedRowKeys = ref([])
 
 // Filter State
 const filterLevel = ref('all')
 const searchText = ref('')
-const dateRange = ref(null) // [start, end]
+const dateRange = ref(null)
 const loadLimit = ref(500)
+const showFilterDrawer = ref(false)
+
+// Responsive
+const isMobile = ref(false)
+const collapsed = ref(true)
+const showMobileSidebar = ref(false)
+
+const checkMobile = () => {
+  isMobile.value = window.innerWidth < 768
+  if (isMobile.value) {
+    collapsed.value = true
+  }
+}
+
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+  loadData(false)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
 
 const API_BASE = '/api'
 
@@ -43,7 +77,7 @@ const fetchWithAuth = async (url, options = {}) => {
   const token = localStorage.getItem('token')
   const res = await fetch(API_BASE + url, {
     ...options,
-    headers: { 
+    headers: {
       'Authorization': `Bearer ${token}`,
       ...options.headers
     }
@@ -51,201 +85,306 @@ const fetchWithAuth = async (url, options = {}) => {
   if (res.status === 401) {
     localStorage.removeItem('token')
     router.push('/login')
-    throw new Error('Unauthorized')
+    throw new Error('会话已过期，请重新登录')
+  }
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}))
+    throw new Error(errorData.detail || `请求失败 (${res.status})`)
   }
   return res
 }
 
 const loadData = async (isRefresh = false) => {
   if (!isRefresh && messages.value.length === 0) {
-      loading.value = true
+    loading.value = true
   }
-  
+
   try {
-    // Build query params for server-side slice
     let query = `?limit=${loadLimit.value}`
     if (dateRange.value) {
-        // Backend expects ISO strings or compatible formats
-        // ElementPlus/NaiveUI timestamps are usually ms. Convert to ISO.
-        query += `&start_date=${new Date(dateRange.value[0]).toISOString()}`
-        query += `&end_date=${new Date(dateRange.value[1]).toISOString()}`
+      query += `&start_date=${new Date(dateRange.value[0]).toISOString()}`
+      query += `&end_date=${new Date(dateRange.value[1]).toISOString()}`
     }
 
     const [msgRes, projRes] = await Promise.all([
-      fetchWithAuth(`/messages${query}`), 
+      fetchWithAuth(`/messages${query}`),
       fetchWithAuth('/projects')
     ])
-    
-    if (msgRes.ok) messages.value = await msgRes.json()
-    if (projRes.ok) projects.value = await projRes.json()
-    
+
+    messages.value = await msgRes.json()
+    projects.value = await projRes.json()
+
     if (isRefresh) message.success('已刷新')
-    
   } catch (e) {
-    // console.error(e)
+    message.error(e.message || '加载数据失败')
   } finally {
     loading.value = false
   }
 }
 
 // Handlers
-// Search/Filter no longer trigger API calls -> Handled by Computed
 const handleSwitchProject = (key) => {
-    selectedProjectKey.value = key
-    // no loadData() needed
+  selectedProjectKey.value = key
 }
+
+const handleMobileSwitchProject = (key) => {
+  selectedProjectKey.value = key
+  showMobileSidebar.value = false
+}
+
 const handleRefresh = () => loadData(true)
 
+// Optimistic delete
 const handleDeleteMessage = async (id) => {
+  const index = messages.value.findIndex(m => m.id === id)
+  if (index === -1) return
+
+  const backup = messages.value[index]
+  messages.value.splice(index, 1)
+
   try {
-    const res = await fetchWithAuth(`/messages/${id}`, { method: 'DELETE' })
-    if (res.ok) {
-      message.success('已删除')
-      loadData(false) // Silent update
+    await fetchWithAuth(`/messages/${id}`, { method: 'DELETE' })
+    message.success('已删除')
+  } catch (e) {
+    messages.value.splice(index, 0, backup)
+    message.error('删除失败：' + e.message)
+  }
+}
+
+// Batch delete
+const handleBatchDelete = async () => {
+  if (checkedRowKeys.value.length === 0) return
+
+  const toDelete = [...checkedRowKeys.value]
+  const backups = []
+
+  toDelete.forEach(id => {
+    const index = messages.value.findIndex(m => m.id === id)
+    if (index !== -1) {
+      backups.push({ index, item: messages.value[index] })
+      messages.value.splice(index, 1)
     }
-  } catch (e) {}
+  })
+
+  try {
+    await Promise.all(
+      toDelete.map(id => fetchWithAuth(`/messages/${id}`, { method: 'DELETE' }))
+    )
+    message.success(`已删除 ${toDelete.length} 条消息`)
+    checkedRowKeys.value = []
+  } catch (e) {
+    backups.reverse().forEach(({ index, item }) => {
+      messages.value.splice(index, 0, item)
+    })
+    message.error('批量删除失败：' + e.message)
+  }
 }
 
 const handlePurge = async () => {
-    try {
-        const res = await fetchWithAuth(`/system/purge`, { method: 'DELETE' })
-        if (res.ok) {
-            const data = await res.json()
-            message.success(`已清空 ${data.deleted_count} 条垃圾数据`)
-            loadData(false)
-        }
-    } catch (e) {}
+  try {
+    const res = await fetchWithAuth(`/system/purge`, { method: 'DELETE' })
+    const data = await res.json()
+    message.success(`已清空 ${data.deleted_count} 条垃圾数据`)
+    loadData(false)
+  } catch (e) {
+    message.error('清空失败：' + e.message)
+  }
 }
 
 const handleToday = () => {
-    const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
-    dateRange.value = [start.getTime(), end.getTime()]
-    loadData(true)
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+  dateRange.value = [start.getTime(), end.getTime()]
+  loadData(true)
+  showFilterDrawer.value = false
 }
 
-const handleDeleteProject = async (id, event) => {
-    try {
-        const res = await fetchWithAuth(`/projects/${id}`, { method: 'DELETE' })
-        if (res.ok) {
-            message.success('项目已删除')
-            if (selectedProjectKey.value === id) selectedProjectKey.value = 'all'
-            loadData(false)
-        }
-    } catch (e) {}
+const handleDeleteProject = async (id) => {
+  try {
+    await fetchWithAuth(`/projects/${id}`, { method: 'DELETE' })
+    message.success('项目已删除')
+    if (selectedProjectKey.value === id) selectedProjectKey.value = 'all'
+    loadData(false)
+  } catch (e) {
+    message.error('删除项目失败：' + e.message)
+  }
 }
 
-onMounted(() => {
-  loadData(false)
-})
+const handleCopyProjectKey = async (project) => {
+  try {
+    await navigator.clipboard.writeText(project.api_key || project.id)
+    message.success('已复制 API Key')
+  } catch {
+    message.error('复制失败')
+  }
+}
 
-// Client-Side Computed Filtering for Extreme Performance
+const getProjectMenuOptions = (project) => [
+  { label: '复制 API Key', key: 'copy', icon: () => h(NIcon, null, { default: () => h(CopyOutline) }) },
+  { type: 'divider' },
+  { label: '删除项目', key: 'delete', icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) }
+]
+
+const handleProjectAction = (key, project) => {
+  if (key === 'copy') {
+    handleCopyProjectKey(project)
+  } else if (key === 'delete') {
+    handleDeleteProject(project.id)
+  }
+}
+
+const applyFilter = () => {
+  showFilterDrawer.value = false
+  loadData(true)
+}
+
+// Client-Side Computed Filtering
 const filteredMessages = computed(() => {
-    let result = messages.value // Start with raw data
-    
-    // 1. Project Filter
-    if (selectedProjectKey.value !== 'all') {
-        const p = projects.value.find(x => x.id === selectedProjectKey.value)
-        const pName = p ? p.name : ''
-        result = result.filter(m => m.project_name === pName)
-    }
+  let result = messages.value
 
-    // 2. Level Filter
-    if (filterLevel.value !== 'all') {
-        result = result.filter(m => m.level === filterLevel.value)
-    }
+  if (selectedProjectKey.value !== 'all') {
+    const p = projects.value.find(x => x.id === selectedProjectKey.value)
+    const pName = p ? p.name : ''
+    result = result.filter(m => m.project_name === pName)
+  }
 
-    // 3. Search Text
-    if (searchText.value && searchText.value.trim() !== '') {
-        const lowerSearch = searchText.value.toLowerCase()
-        result = result.filter(m => 
-            m.title.toLowerCase().includes(lowerSearch) || 
-            m.content.toLowerCase().includes(lowerSearch) ||
-            m.project_name.toLowerCase().includes(lowerSearch)
-        )
-    }
-    
-    return result
+  if (filterLevel.value !== 'all') {
+    result = result.filter(m => m.level === filterLevel.value)
+  }
+
+  if (searchText.value && searchText.value.trim() !== '') {
+    const lowerSearch = searchText.value.toLowerCase()
+    result = result.filter(m =>
+      m.title.toLowerCase().includes(lowerSearch) ||
+      m.content.toLowerCase().includes(lowerSearch) ||
+      m.project_name.toLowerCase().includes(lowerSearch)
+    )
+  }
+
+  return result
 })
 
 const stats = computed(() => ({
-  total: filteredMessages.value.length, // Show stats based on CURRENT filter view
-  errors: messages.value.filter(m => m.level === 'error').length, // Global errors always useful? Or should match filter? usually Global Errors is a dashboard key metric. Let's keep Global Errors.
+  total: filteredMessages.value.length,
+  errors: messages.value.filter(m => m.level === 'error').length,
   projects: projects.value.length
 }))
 
-// Menu Options Construction
+const rowKey = (row) => row.id
+
+// Menu Options with Icons - flat structure for proper collapse behavior
 const menuOptions = computed(() => {
-    return [
-        { 
-            label: '概览', 
-            key: 'overview_group', 
-            type: 'group',
-            children: [
-               { label: '全部项目', key: 'all' }
-            ]
-        },
-        { 
-            label: '项目列表', 
-            key: 'projects_group', 
-            type: 'group',
-            children: projects.value.map(p => ({ 
-                label: p.name, 
-                key: p.id
-            }))
-        }
-    ]
+  const projectItems = projects.value.map(p => ({
+    label: p.name,
+    key: p.id,
+    icon: () => h(NIcon, null, { default: () => h(FolderOutline) }),
+    extra: () => h(NDropdown, {
+      options: getProjectMenuOptions(p),
+      trigger: 'click',
+      placement: 'bottom-end',
+      onSelect: (key) => handleProjectAction(key, p)
+    }, {
+      default: () => h(NButton, {
+        quaternary: true,
+        circle: true,
+        size: 'tiny',
+        onClick: (e) => e.stopPropagation()
+      }, { icon: () => h(NIcon, { size: 14 }, { default: () => h(EllipsisVertical) }) })
+    })
+  }))
+
+  return [
+    {
+      label: '全部项目',
+      key: 'all',
+      icon: () => h(NIcon, null, { default: () => h(HomeOutline) })
+    },
+    {
+      type: 'divider',
+      key: 'd1'
+    },
+    ...projectItems
+  ]
 })
 
-// Table Columns
-const columns = [
-  { title: '级别', key: 'level', width: 90,
-    render(row) {
-      const typeMap = { error: 'error', warning: 'warning', success: 'success', info: 'info' }
-      const textMap = { error: '错误', warning: '警告', success: '成功', info: '信息' }
-      return h(NTag, { type: typeMap[row.level] || 'default', bordered: false, round: true, size: 'small' }, { default: () => textMap[row.level] || row.level.toUpperCase() })
+// Table Columns - responsive
+const columns = computed(() => {
+  const baseColumns = [
+    { type: 'selection' },
+    {
+      title: '级别',
+      key: 'level',
+      width: 80,
+      render(row) {
+        const typeMap = { error: 'error', warning: 'warning', success: 'success', info: 'info' }
+        const textMap = { error: '错误', warning: '警告', success: '成功', info: '信息' }
+        return h(NTag, { type: typeMap[row.level] || 'default', bordered: false, round: true, size: 'small' }, { default: () => textMap[row.level] || row.level.toUpperCase() })
+      }
+    },
+    { title: '来源', key: 'project_name', width: 100, ellipsis: true },
+    {
+      title: '标题',
+      key: 'title',
+      width: 160,
+      ellipsis: { tooltip: true },
+      render(row) {
+        return h('b', {}, row.title)
+      }
+    },
+    { title: '内容', key: 'content', ellipsis: { tooltip: { width: 300 } } },
+    {
+      title: '时间',
+      key: 'created_at',
+      width: 150,
+      render: (row) => new Date(row.created_at).toLocaleString('zh-CN')
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 70,
+      render(row) {
+        return h(
+          NPopconfirm,
+          {
+            onPositiveClick: () => handleDeleteMessage(row.id),
+            'positive-text': '确认',
+            'negative-text': '取消'
+          },
+          {
+            trigger: () => h(NButton, { size: 'tiny', type: 'error', quaternary: true }, { default: () => '删除' }),
+            default: () => '确定删除?'
+          }
+        )
+      }
     }
-  },
-  { title: '来源项目', key: 'project_name', width: 140 },
-  { title: '标题', key: 'title', width: 200, ellipsis: { tooltip: true }, render(row) {
-      return h('b', {}, row.title)
-  }},
-  { title: '内容详情', key: 'content', ellipsis: { tooltip: { width: 400 } } },
-  { title: '时间', key: 'created_at', width: 170, 
-    render: (row) => new Date(row.created_at).toLocaleString('zh-CN') 
-  },
-  { title: '操作', key: 'actions', width: 80, 
-    render(row) {
-      return h(
-        NPopconfirm,
-        {
-          onPositiveClick: () => handleDeleteMessage(row.id),
-          'positive-text': '确认',
-          'negative-text': '取消'
-        },
-        {
-          trigger: () => h(NButton, { size: 'tiny', type: 'error', quaternary: true }, { default: () => '删除' }),
-          default: () => '确定删除这条消息吗?'
-        }
-      )
-    }
-  }
-]
+  ]
+  return baseColumns
+})
 
 const handleLogout = () => {
   localStorage.removeItem('token')
   router.push('/login')
 }
+
+const toggleSidebar = () => {
+  if (isMobile.value) {
+    showMobileSidebar.value = !showMobileSidebar.value
+  } else {
+    collapsed.value = !collapsed.value
+  }
+}
 </script>
 
 <template>
   <n-layout has-sider class="layout-container">
+    <!-- Desktop Sidebar -->
     <n-layout-sider
+      v-if="!isMobile"
       bordered
       collapse-mode="width"
       :collapsed-width="64"
-      :width="220"
+      :width="240"
       :collapsed="collapsed"
       show-trigger
       @collapse="collapsed = true"
@@ -253,8 +392,10 @@ const handleLogout = () => {
       class="sidebar"
     >
       <div class="logo-area">
+        <n-icon :size="collapsed ? 28 : 24" color="#3b82f6">
+          <NotificationsOutline />
+        </n-icon>
         <span v-if="!collapsed" class="logo-text">Notify Hub</span>
-        <span v-else class="logo-text-short">N</span>
       </div>
       <n-menu
         :collapsed="collapsed"
@@ -264,131 +405,274 @@ const handleLogout = () => {
         :value="selectedProjectKey"
         @update:value="handleSwitchProject"
       />
-      <!-- Bottom Actions -->
       <div v-if="!collapsed" class="sidebar-footer">
         <n-popconfirm @positive-click="handlePurge">
-             <template #trigger>
-                <n-button block type="error" ghost size="medium">🗑️ 清空回收站</n-button>
-             </template>
-             确认彻底物理删除所有已标记删除的消息吗？不可恢复！
+          <template #trigger>
+            <n-button block type="error" ghost size="medium">
+              <template #icon>
+                <n-icon><TrashOutline /></n-icon>
+              </template>
+              清空回收站
+            </n-button>
+          </template>
+          确认彻底删除所有已标记删除的消息？
         </n-popconfirm>
       </div>
     </n-layout-sider>
 
+    <!-- Mobile Sidebar Drawer -->
+    <n-drawer v-model:show="showMobileSidebar" placement="left" :width="260">
+      <n-drawer-content body-content-style="padding: 0;">
+        <div class="logo-area">
+          <n-icon :size="24" color="#3b82f6">
+            <NotificationsOutline />
+          </n-icon>
+          <span class="logo-text">Notify Hub</span>
+        </div>
+        <n-menu
+          :options="menuOptions"
+          :value="selectedProjectKey"
+          @update:value="handleMobileSwitchProject"
+        />
+        <div class="sidebar-footer">
+          <n-popconfirm @positive-click="handlePurge">
+            <template #trigger>
+              <n-button block type="error" ghost size="medium">
+                <template #icon>
+                  <n-icon><TrashOutline /></n-icon>
+                </template>
+                清空回收站
+              </n-button>
+            </template>
+            确认彻底删除？
+          </n-popconfirm>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
+
     <n-layout>
       <n-layout-header bordered class="header">
         <div class="header-left">
-          <n-breadcrumb>
+          <!-- Mobile menu button -->
+          <n-button v-if="isMobile" quaternary @click="toggleSidebar" class="menu-btn">
+            <template #icon>
+              <n-icon :size="22"><MenuOutline /></n-icon>
+            </template>
+          </n-button>
+          <n-breadcrumb v-if="!isMobile">
             <n-breadcrumb-item>Notify Hub</n-breadcrumb-item>
             <n-breadcrumb-item>控制台</n-breadcrumb-item>
           </n-breadcrumb>
+          <span v-else class="mobile-title">Notify Hub</span>
         </div>
-        
+
         <div class="header-right">
-           <div class="user-info">管理员</div>
-           <n-button size="small" quaternary type="error" @click="handleLogout">
-             退出登录
-           </n-button>
+          <span v-if="!isMobile" class="user-info">管理员</span>
+          <n-button size="small" quaternary type="error" @click="handleLogout">
+            退出
+          </n-button>
         </div>
       </n-layout-header>
 
-      <n-layout-content content-style="padding: 24px; background-color: #f3f4f6;">
-        
-        <!-- Filter Bar -->
-        <n-card :bordered="true" class="mb-6 rounded-lg filter-card" size="small">
-            <div class="filter-row">
-                <!-- 1. Client-Side Filter: Level -->
-                <div class="filter-item w-select">
-                    <n-select v-model:value="filterLevel" :options="[
-                        {label: '全部级别', value: 'all'},
-                        {label: '信息', value: 'info'},
-                        {label: '成功', value: 'success'},
-                        {label: '警告', value: 'warning'},
-                        {label: '错误', value: 'error'}
-                    ]" size="medium" placeholder="级别" />
-                </div>
-
-                <!-- 2. Server-Side Filter: Date Range -->
-                <div class="filter-item w-date">
-                    <n-date-picker 
-                        v-model:value="dateRange" 
-                        type="datetimerange" 
-                        clearable 
-                        size="medium"
-                        placeholder="选择时间范围"
-                        @update:value="() => loadData(true)" 
-                    />
-                </div>
-
-                <!-- 3. Server-Side Filter: Limit -->
-                 <div class="filter-item w-limit">
-                    <n-select v-model:value="loadLimit" :options="[
-                        {label: '近500条', value: 500},
-                        {label: '近1000条', value: 1000},
-                        {label: '近2000条', value: 2000},
-                        {label: '近5000条', value: 5000}
-                    ]" size="medium" @update:value="() => loadData(true)" />
-                </div>
-
-                <!-- 3.5. Shortcut: Today -->
-                 <n-button strong secondary type="info" size="medium" @click="handleToday">
-                    今日
-                 </n-button>
-
-                <!-- 4. Client-Side Filter: Search -->
-                <div class="filter-item w-search">
-                    <n-input v-model:value="searchText" placeholder="本地搜索标题或内容..." clearable>
-                        <template #suffix>🔍</template>
-                    </n-input>
-                </div>
-
-                <div class="spacer"></div>
-                <n-button circle secondary type="primary" @click="handleRefresh" title="刷新数据">
-                    <template #icon>🔄</template>
-                </n-button>
-            </div>
-        </n-card>
-
-        <!-- Stats Cards (Simplified) -->
+      <n-layout-content class="main-content">
+        <!-- Stats Cards -->
         <div class="stats-grid">
-           <n-card size="small" :bordered="true" class="stat-card">
-              <n-statistic label="当前展示" :value="stats.total" />
-           </n-card>
-           <n-card size="small" :bordered="true" class="stat-card">
-              <n-statistic label="异常报警" :value="stats.errors" class="text-error">
-                 <template #suffix>
-                    <span style="font-size: 14px; color: #d03050" v-if="stats.errors > 0">待处理</span>
-                 </template>
-              </n-statistic>
-           </n-card>
-           <n-card size="small" :bordered="true" class="stat-card">
-              <n-statistic label="项目总数" :value="stats.projects" />
-           </n-card>
+          <div class="stat-card stat-card-blue">
+            <div class="stat-icon">
+              <n-icon :size="24"><NotificationsOutline /></n-icon>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{{ stats.total }}</div>
+              <div class="stat-label">当前展示</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-red">
+            <div class="stat-icon">
+              <n-icon :size="24"><AlertCircleOutline /></n-icon>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{{ stats.errors }}</div>
+              <div class="stat-label">异常报警</div>
+            </div>
+          </div>
+          <div class="stat-card stat-card-green">
+            <div class="stat-icon">
+              <n-icon :size="24"><FolderOutline /></n-icon>
+            </div>
+            <div class="stat-content">
+              <div class="stat-value">{{ stats.projects }}</div>
+              <div class="stat-label">项目总数</div>
+            </div>
+          </div>
         </div>
 
-        <!-- Main Table -->
-        <n-card title="消息列表" :bordered="true" class="main-card" size="medium">
-            <template #header-extra>
-                <!-- Optional: Delete Project Button if a specific project is selected -->
-                 <n-popconfirm v-if="selectedProjectKey !== 'all'" @positive-click="handleDeleteProject(selectedProjectKey)">
-                    <template #trigger>
-                       <n-button size="small" type="error" class="mr-2">删除当前项目</n-button>
-                    </template>
-                    确认删除该项目吗？
-                 </n-popconfirm>
+        <!-- Filter Bar -->
+        <n-card :bordered="false" class="filter-card" size="small">
+          <div class="filter-row">
+            <!-- Mobile: Filter button -->
+            <template v-if="isMobile">
+              <n-input
+                v-model:value="searchText"
+                placeholder="搜索..."
+                clearable
+                style="flex: 1"
+              />
+              <n-button @click="showFilterDrawer = true">
+                <template #icon>
+                  <n-icon><FilterOutline /></n-icon>
+                </template>
+              </n-button>
             </template>
+
+            <!-- Desktop: Full filter row -->
+            <template v-else>
+              <n-select
+                v-model:value="filterLevel"
+                :options="[
+                  { label: '全部级别', value: 'all' },
+                  { label: '信息', value: 'info' },
+                  { label: '成功', value: 'success' },
+                  { label: '警告', value: 'warning' },
+                  { label: '错误', value: 'error' }
+                ]"
+                size="medium"
+                placeholder="级别"
+                style="width: 120px"
+              />
+
+              <n-date-picker
+                v-model:value="dateRange"
+                type="datetimerange"
+                clearable
+                size="medium"
+                placeholder="选择时间范围"
+                style="width: 340px"
+                @update:value="() => loadData(true)"
+              />
+
+              <n-select
+                v-model:value="loadLimit"
+                :options="[
+                  { label: '近500条', value: 500 },
+                  { label: '近1000条', value: 1000 },
+                  { label: '近2000条', value: 2000 },
+                  { label: '近5000条', value: 5000 }
+                ]"
+                size="medium"
+                style="width: 110px"
+                @update:value="() => loadData(true)"
+              />
+
+              <n-button strong secondary type="info" size="medium" @click="handleToday">
+                今日
+              </n-button>
+
+              <n-input
+                v-model:value="searchText"
+                placeholder="搜索标题或内容..."
+                clearable
+                style="width: 200px"
+              />
+
+              <div style="flex: 1"></div>
+
+              <n-popconfirm
+                v-if="checkedRowKeys.length > 0"
+                @positive-click="handleBatchDelete"
+              >
+                <template #trigger>
+                  <n-button type="error" size="medium">
+                    删除选中 ({{ checkedRowKeys.length }})
+                  </n-button>
+                </template>
+                确定删除选中的 {{ checkedRowKeys.length }} 条消息吗？
+              </n-popconfirm>
+            </template>
+
+            <n-button circle secondary type="primary" @click="handleRefresh" title="刷新">
+              <template #icon>
+                <n-icon><RefreshOutline /></n-icon>
+              </template>
+            </n-button>
+          </div>
+        </n-card>
+
+        <!-- Main Table -->
+        <n-card :bordered="false" class="table-card" size="medium">
+          <template #header>
+            <span style="font-weight: 600">消息列表</span>
+          </template>
+          <template #header-extra>
+            <n-popconfirm v-if="selectedProjectKey !== 'all'" @positive-click="handleDeleteProject(selectedProjectKey)">
+              <template #trigger>
+                <n-button size="small" type="error" secondary>删除项目</n-button>
+              </template>
+              确认删除该项目吗？
+            </n-popconfirm>
+          </template>
+
+          <template v-if="loading && messages.length === 0">
+            <n-skeleton text :repeat="6" />
+          </template>
+
           <n-data-table
+            v-else
             :columns="columns"
             :data="filteredMessages"
             :loading="loading"
-            :pagination="{ pageSize: 12 }"
-            :max-height="'calc(100vh - 420px)'"
+            :pagination="{ pageSize: isMobile ? 8 : 12 }"
+            :max-height="isMobile ? 'calc(100vh - 360px)' : 'calc(100vh - 400px)'"
             :single-line="false"
+            :row-key="rowKey"
+            v-model:checked-row-keys="checkedRowKeys"
+            :scroll-x="900"
             striped
           />
         </n-card>
       </n-layout-content>
     </n-layout>
+
+    <!-- Mobile Filter Drawer -->
+    <n-drawer v-model:show="showFilterDrawer" placement="bottom" :height="360">
+      <n-drawer-content title="筛选条件">
+        <n-space vertical size="large">
+          <n-form-item label="级别">
+            <n-select
+              v-model:value="filterLevel"
+              :options="[
+                { label: '全部级别', value: 'all' },
+                { label: '信息', value: 'info' },
+                { label: '成功', value: 'success' },
+                { label: '警告', value: 'warning' },
+                { label: '错误', value: 'error' }
+              ]"
+            />
+          </n-form-item>
+          <n-form-item label="时间范围">
+            <n-date-picker
+              v-model:value="dateRange"
+              type="datetimerange"
+              clearable
+              style="width: 100%"
+            />
+          </n-form-item>
+          <n-form-item label="加载数量">
+            <n-select
+              v-model:value="loadLimit"
+              :options="[
+                { label: '近500条', value: 500 },
+                { label: '近1000条', value: 1000 },
+                { label: '近2000条', value: 2000 }
+              ]"
+            />
+          </n-form-item>
+          <n-space>
+            <n-button type="info" @click="handleToday">今日</n-button>
+            <n-button type="primary" @click="applyFilter">应用筛选</n-button>
+          </n-space>
+        </n-space>
+      </n-drawer-content>
+    </n-drawer>
   </n-layout>
 </template>
 
@@ -397,117 +681,170 @@ const handleLogout = () => {
   height: 100vh;
 }
 
+.sidebar {
+  background: #fff;
+}
+
 .logo-area {
   height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid #efeff5;
-  background-color: #fff;
+  gap: 10px;
+  border-bottom: 1px solid #f0f0f0;
+  background: linear-gradient(135deg, #f8fafc, #f0f9ff);
 }
 
 .logo-text {
   font-size: 18px;
-  font-weight: bold;
-  color: #2080f0;
-}
-
-.logo-text-short {
-  font-size: 20px;
-  font-weight: bold;
-  color: #2080f0;
+  font-weight: 700;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .header {
-  height: 64px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  background-color: #fff;
+  padding: 0 16px;
+  background: #fff;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-btn {
+  margin-right: 4px;
+}
+
+.mobile-title {
+  font-weight: 600;
+  color: #3b82f6;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .user-info {
   font-size: 14px;
-  color: #333;
+  color: #64748b;
 }
 
-/* Filter Bar Styles */
-.filter-card {
-    background-color: #fff;
+.main-content {
+  padding: 16px;
+  background: #f8fafc;
+  overflow-y: auto;
 }
 
-.filter-row {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    width: 100%;
-}
-
-.w-select {
-    width: 140px;
-    flex-shrink: 0;
-}
-
-.w-date {
-    width: 340px;
-    flex-shrink: 0;
-}
-
-.w-limit {
-    width: 110px;
-    flex-shrink: 0;
-}
-
-.w-search {
-    width: 240px;
-    flex-shrink: 0;
-}
-
-.spacer {
-    flex: 1;
-}
-
-/* Stats Grid Styles */
+/* Stats Grid - Responsive */
 .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
-    margin-bottom: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .main-content {
+    padding: 12px;
+  }
 }
 
 .stat-card {
-  background-color: #fff;
-  border-radius: 8px;
-  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.25s ease;
 }
 
 .stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
-.main-card {
-  background-color: #fff;
-  border-radius: 8px;
-  height: 100%;
+.stat-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.stat-card-blue .stat-icon {
+  background: #eff6ff;
+  color: #3b82f6;
+}
+
+.stat-card-red .stat-icon {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+.stat-card-green .stat-icon {
+  background: #f0fdf4;
+  color: #10b981;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* Filter Card */
+.filter-card {
+  margin-bottom: 16px;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Table Card */
+.table-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .sidebar-footer {
-    padding: 16px;
-    display: flex;
-    justify-content: center;
-    border-top: 1px solid #efeff5;
-    background-color: #fff;
+  padding: 16px;
+  border-top: 1px solid #f0f0f0;
+  background: #fff;
+  margin-top: auto;
 }
 
-:deep(.n-statistic-value__content) {
-  font-weight: 600;
+:deep(.n-data-table-tr--striped) {
+  background: #fafafa;
 }
 </style>

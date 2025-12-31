@@ -18,13 +18,22 @@
 <script setup>
 import { zhCN, dateZhCN } from 'naive-ui'
 
-// Custom Theme Variables for "Tech Blue"
+// Custom Theme - Vibrant Blue
 const themeOverrides = {
   common: {
-    primaryColor: '#2080f0',
-    primaryColorHover: '#4098fc',
-    primaryColorPressed: '#1060c9',
-    primaryColorSuppl: '#4098fc'
+    primaryColor: '#3b82f6',
+    primaryColorHover: '#2563eb',
+    primaryColorPressed: '#1d4ed8',
+    primaryColorSuppl: '#60a5fa',
+    borderRadius: '8px',
+    borderRadiusSmall: '6px'
+  },
+  Card: {
+    borderRadius: '12px'
+  },
+  Button: {
+    borderRadiusMedium: '8px',
+    borderRadiusSmall: '6px'
   }
 }
 </script>
@@ -33,17 +42,31 @@ const themeOverrides = {
   <n-config-provider :locale="zhCN" :date-locale="dateZhCN" :theme-overrides="themeOverrides">
     <n-global-style />
     <n-message-provider>
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </transition>
+      </router-view>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <style>
-/* Reset & Base Fonts */
 html, body {
   margin: 0;
   padding: 0;
-  background-color: #f3f4f6; /* Light Gray Background */
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  background-color: #f8fafc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
+
