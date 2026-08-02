@@ -256,7 +256,7 @@ const filteredMessages = computed(() => {
   if (searchText.value && searchText.value.trim() !== '') {
     const lowerSearch = searchText.value.toLowerCase()
     result = result.filter(m =>
-      m.title.toLowerCase().includes(lowerSearch) ||
+      (m.title || '').toLowerCase().includes(lowerSearch) ||
       m.content.toLowerCase().includes(lowerSearch) ||
       m.project_name.toLowerCase().includes(lowerSearch)
     )

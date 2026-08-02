@@ -28,12 +28,17 @@ from pydantic import BaseModel
 import secrets
 from contextlib import asynccontextmanager
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 # Auth Config
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-should-be-changed")
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY or SECRET_KEY == "your-secret-key-should-be-changed":
+    raise RuntimeError(
+        "SECRET_KEY is not set or is still the insecure default. "
+        "Set a strong random SECRET_KEY in the environment before starting."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 
@@ -79,7 +84,6 @@ class ProjectResponse(BaseModel):
     created_at: str 
 
 class MessageCreate(BaseModel):
-    project_name: str 
     title: Optional[str] = None
     content: str
     level: str = "info"
@@ -100,7 +104,7 @@ class Token(BaseModel):
 # Helpers
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -119,25 +123,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise credentials_exception
     return username
-
-# Lifecycle
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Establish DB connection and create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(models.Base.metadata.create_all)
-    yield
-
-app = FastAPI(title="Notify Hub API", lifespan=lifespan)
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # In production, restrict this
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Routes
 
@@ -205,30 +190,15 @@ async def create_notification(
     x_project_key: str = Header(..., alias="X-Project-Key"),
     db: AsyncSession = Depends(get_db)
 ):
-    # 1. Global Auth Check
-    global_notify_key = os.getenv("NOTIFY_KEY")
-    if x_project_key != global_notify_key:
-        raise HTTPException(status_code=403, detail="Invalid Global Project Key")
-    
-    # 2. Find or Create Project by Name
-    stmt = select(models.Project).where(models.Project.name == message.project_name)
+    # 1. 用项目级 API Key 定位项目
+    stmt = select(models.Project).where(models.Project.api_key == x_project_key)
     result = await db.execute(stmt)
     project = result.scalar_one_or_none()
-    
-    if not project:
-        # Create new project
-        dummy_api_key = secrets.token_urlsafe(32)
-        new_project = models.Project(name=message.project_name, api_key=dummy_api_key)
-        db.add(new_project)
-        try:
-            await db.commit()
-            await db.refresh(new_project)
-            project = new_project
-        except Exception as e:
-            await db.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to create project: {str(e)}")
 
-    # 3. Save Message
+    if not project:
+        raise HTTPException(status_code=403, detail="Invalid Project API Key")
+
+    # 2. Save Message
     new_message = models.Message(
         project_id=project.id,
         title=message.title,

@@ -1,8 +1,8 @@
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
-# Matches the NOTIFY_KEY in backend/.env
-API_KEY = "my-fixed-secret-key-123"
+# 项目级 API Key —— 从 Notify Hub 前端 Dashboard 的项目菜单「复制 API Key」获取
+API_KEY = "PASTE-PROJECT-API-KEY-HERE"
 
 def test_push_only():
     print(f"Testing Push API against {BASE_URL}...")
@@ -12,11 +12,10 @@ def test_push_only():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # Payload with project_name (Auto-create/Find logic)
+    # Payload without project_name — 项目由 X-Project-Key 头决定
     payload = {
-        "project_name": "Python-Test-Script",
         "title": "Push Test",
-        "content": "This is a notification sent using ONLY the API Key.",
+        "content": "This is a notification sent using ONLY the Project API Key.",
         "level": "info"
     }
     
